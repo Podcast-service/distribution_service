@@ -1,0 +1,44 @@
+# Local development stack.
+# Brings up Postgres (compatible with podcast-core schema) + distribution_service.
+#
+# Если у тебя одновременно запущен docker compose из ../Podcast_core,
+# то используй вместо `postgres` сервиса внешний хост:
+#   DATABASE_URL=postgres://podcast_user:podcast_pass@host.docker.internal:5432/podcast_db
+# и закомментируй секцию postgres ниже.
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-podcast_db}
+      POSTGRES_USER: ${POSTGRES_USER:-podcast_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-podcast_pass}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-podcast_user} -d ${POSTGRES_DB:-podcast_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  distribution_service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-podcast_user}:${POSTGRES_PASSWORD:-podcast_pass}@postgres:5432/${POSTGRES_DB:-podcast_db}
+      BIND_ADDR: 0.0.0.0:8788
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8788}
+      RUST_LOG: ${RUST_LOG:-distribution_service=info,tower_http=info,sqlx=warn}
+      DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-10}
+    ports:
+      - "8788:8788"
+
+volumes:
+  postgres_data:
