@@ -34,9 +34,18 @@ pub async fn get_feed(
         .map_err(|_| AppError::BadRequest(format!("invalid uuid: {id_str}")))?;
 
     let playlist = queries::fetch_playlist(&state.pool, playlist_id).await?;
-    let episodes = queries::fetch_episodes(&state.pool, playlist_id).await?;
+    let (episodes, owner_email) = tokio::join!(
+        queries::fetch_episodes(&state.pool, playlist_id),
+        state.auth.get_email(playlist.owner_user_id),
+    );
+    let episodes = episodes?;
 
-    let xml = rss::build_feed(&playlist, &episodes, &state.public_base_url)?;
+    let xml = rss::build_feed(
+        &playlist,
+        &episodes,
+        &state.public_base_url,
+        owner_email.as_deref(),
+    )?;
 
     let mut headers = HeaderMap::new();
     headers.insert(

@@ -3,13 +3,33 @@ use std::io::Cursor;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
 use quick_xml::Writer;
 
+use crate::categories::{self, AppleCategory};
 use crate::error::{AppError, AppResult};
 use crate::models::{Episode, Playlist};
+
+/// Pre-computed values that depend on the *set* of episodes rather than
+/// the playlist row itself. Resolved once before XML emission so we
+/// don't repeat the same scan in every helper.
+struct FeedContext<'a> {
+    /// Apple-compatible `<itunes:category>` for the channel.
+    /// Resolved from the first episode that has a category set.
+    channel_category: Option<AppleCategory>,
+    /// Image URL used as the channel's `<itunes:image>`.
+    /// Resolution order: playlist's own cover → first episode that has a cover → None.
+    channel_image: Option<&'a str>,
+    /// True if the channel image came from the playlist itself (in which
+    /// case we may reuse it as a per-episode fallback). False if it was
+    /// inherited from an episode — in that case we don't propagate it
+    /// further so we don't smear one episode's cover onto another.
+    channel_image_is_playlist_own: bool,
+    owner_email: Option<&'a str>,
+}
 
 pub fn build_feed(
     playlist: &Playlist,
     episodes: &[Episode],
     base_url: &str,
+    owner_email: Option<&str>,
 ) -> AppResult<String> {
     let mut writer = Writer::new_with_indent(Cursor::new(Vec::<u8>::new()), b' ', 2);
 
@@ -27,10 +47,12 @@ pub fn build_feed(
         .write_event(Event::Start(BytesStart::new("channel")))
         .map_err(rss_err)?;
 
-    write_channel(&mut writer, playlist, base_url)?;
+    let ctx = build_context(playlist, episodes, owner_email);
+
+    write_channel(&mut writer, playlist, &ctx, base_url)?;
 
     for episode in episodes {
-        write_episode(&mut writer, episode, base_url)?;
+        write_episode(&mut writer, episode, &ctx)?;
     }
 
     writer
@@ -44,9 +66,36 @@ pub fn build_feed(
     String::from_utf8(bytes).map_err(|e| AppError::Rss(e.to_string()))
 }
 
+fn build_context<'a>(
+    playlist: &'a Playlist,
+    episodes: &'a [Episode],
+    owner_email: Option<&'a str>,
+) -> FeedContext<'a> {
+    let channel_category = episodes
+        .iter()
+        .find_map(|e| e.category_name.as_deref())
+        .and_then(categories::resolve);
+
+    let (channel_image, channel_image_is_playlist_own) = match playlist.cover_image_url.as_deref() {
+        Some(url) => (Some(url), true),
+        None => (
+            episodes.iter().find_map(|e| e.cover_image_url.as_deref()),
+            false,
+        ),
+    };
+
+    FeedContext {
+        channel_category,
+        channel_image,
+        channel_image_is_playlist_own,
+        owner_email,
+    }
+}
+
 fn write_channel<W: std::io::Write>(
     writer: &mut Writer<W>,
     playlist: &Playlist,
+    ctx: &FeedContext,
     base_url: &str,
 ) -> AppResult<()> {
     write_text(writer, "title", &playlist.title)?;
@@ -68,6 +117,10 @@ fn write_channel<W: std::io::Write>(
     write_text(writer, "pubDate", &playlist.updated_at.to_rfc2822())?;
     write_text(writer, "lastBuildDate", &playlist.updated_at.to_rfc2822())?;
 
+    // <itunes:type>serial</itunes:type> — we number episodes via
+    // <itunes:episode>1,2,3..., which is the serial signal Apple expects.
+    write_text(writer, "itunes:type", "serial")?;
+
     write_text(writer, "itunes:explicit", "false")?;
     write_text(writer, "itunes:author", &playlist.owner_username)?;
 
@@ -75,25 +128,51 @@ fn write_channel<W: std::io::Write>(
         .write_event(Event::Start(BytesStart::new("itunes:owner")))
         .map_err(rss_err)?;
     write_text(writer, "itunes:name", &playlist.owner_username)?;
+    if let Some(email) = ctx.owner_email {
+        if !email.is_empty() {
+            write_text(writer, "itunes:email", email)?;
+        }
+    }
     writer
         .write_event(Event::End(BytesEnd::new("itunes:owner")))
         .map_err(rss_err)?;
 
-    let channel_image = playlist
-        .cover_image_url
-        .as_deref()
-        .or(playlist.owner_avatar_url.as_deref());
-    if let Some(href) = channel_image {
+    if let Some(href) = ctx.channel_image {
         write_self_closing(writer, "itunes:image", &[("href", href)])?;
     }
 
+    if let Some(cat) = &ctx.channel_category {
+        write_itunes_category(writer, cat)?;
+    }
+
+    Ok(())
+}
+
+fn write_itunes_category<W: std::io::Write>(
+    writer: &mut Writer<W>,
+    cat: &AppleCategory,
+) -> AppResult<()> {
+    match cat.child {
+        Some(child) => {
+            let mut elem = BytesStart::new("itunes:category");
+            elem.push_attribute(("text", cat.parent));
+            writer.write_event(Event::Start(elem)).map_err(rss_err)?;
+            write_self_closing(writer, "itunes:category", &[("text", child)])?;
+            writer
+                .write_event(Event::End(BytesEnd::new("itunes:category")))
+                .map_err(rss_err)?;
+        }
+        None => {
+            write_self_closing(writer, "itunes:category", &[("text", cat.parent)])?;
+        }
+    }
     Ok(())
 }
 
 fn write_episode<W: std::io::Write>(
     writer: &mut Writer<W>,
     episode: &Episode,
-    _base_url: &str,
+    ctx: &FeedContext,
 ) -> AppResult<()> {
     writer
         .write_event(Event::Start(BytesStart::new("item")))
@@ -118,8 +197,20 @@ fn write_episode<W: std::io::Write>(
     let pub_date = episode.published_at.unwrap_or(episode.created_at);
     write_text(writer, "pubDate", &pub_date.to_rfc2822())?;
 
-    if let Some(cover) = &episode.cover_image_url {
-        write_self_closing(writer, "itunes:image", &[("href", cover)])?;
+    // Episode image:
+    //   1. episode's own cover, if any;
+    //   2. else playlist's own cover (but NOT an inherited channel image
+    //      that we picked from a sibling episode — we don't want to
+    //      smear one episode's art onto another).
+    let episode_image = episode.cover_image_url.as_deref().or_else(|| {
+        if ctx.channel_image_is_playlist_own {
+            ctx.channel_image
+        } else {
+            None
+        }
+    });
+    if let Some(href) = episode_image {
+        write_self_closing(writer, "itunes:image", &[("href", href)])?;
     }
 
     let mime = guess_audio_mime(&episode.audio_url);

@@ -37,6 +37,9 @@ services:
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8788}
       RUST_LOG: ${RUST_LOG:-distribution_service=info,tower_http=info,sqlx=warn}
       DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-10}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:-http://localhost:8080}
+      AUTH_INTERNAL_API_TOKEN: ${AUTH_INTERNAL_API_TOKEN:-}
+      AUTH_CACHE_TTL_SECONDS: ${AUTH_CACHE_TTL_SECONDS:-3600}
     ports:
       - "8788:8788"
 

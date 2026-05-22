@@ -21,6 +21,9 @@ services:
       RUST_LOG: ${RUST_LOG:-distribution_service=info,tower_http=warn,sqlx=warn}
       DB_MAX_CONNECTIONS: ${DB_MAX_CONNECTIONS:-25}
       DB_CONNECT_TIMEOUT_SECONDS: ${DB_CONNECT_TIMEOUT_SECONDS:-5}
+      AUTH_SERVICE_URL: ${AUTH_SERVICE_URL:?AUTH_SERVICE_URL is required in prod}
+      AUTH_INTERNAL_API_TOKEN: ${AUTH_INTERNAL_API_TOKEN:?AUTH_INTERNAL_API_TOKEN is required in prod}
+      AUTH_CACHE_TTL_SECONDS: ${AUTH_CACHE_TTL_SECONDS:-3600}
     depends_on: []
     deploy:
       resources:

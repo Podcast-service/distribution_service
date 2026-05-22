@@ -8,8 +8,8 @@ pub struct Playlist {
     pub description: Option<String>,
     pub cover_image_url: Option<String>,
     pub updated_at: DateTime<Utc>,
+    pub owner_user_id: Uuid,
     pub owner_username: String,
-    pub owner_avatar_url: Option<String>,
     pub owner_language: String,
 }
 
@@ -26,4 +26,5 @@ pub struct Episode {
     pub created_at: DateTime<Utc>,
     pub position: i32,
     pub author_name: String,
+    pub category_name: Option<String>,
 }

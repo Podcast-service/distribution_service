@@ -7,6 +7,8 @@ use tokio::net::TcpListener;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
+mod auth_client;
+mod categories;
 mod config;
 mod db;
 mod error;
@@ -15,6 +17,7 @@ mod routes;
 mod rss;
 mod state;
 
+use auth_client::AuthClient;
 use config::AppConfig;
 use state::AppState;
 
@@ -41,9 +44,16 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("database ping failed")?;
 
+    let auth = AuthClient::new(
+        config.auth_service_url.clone(),
+        config.auth_internal_api_token.clone(),
+        Duration::from_secs(config.auth_cache_ttl_seconds),
+    );
+
     let state = AppState {
         pool,
         public_base_url: config.public_base_url.clone(),
+        auth,
     };
 
     let app: Router = routes::router(state);

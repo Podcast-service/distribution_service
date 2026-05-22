@@ -11,10 +11,9 @@ SELECT
     p.description,
     p.cover_image_url,
     p.is_public,
-    p.created_at,
     p.updated_at,
+    up.user_id        AS owner_user_id,
     up.username       AS owner_username,
-    up.avatar_url     AS owner_avatar_url,
     up.language       AS owner_language
 FROM playlists p
 JOIN user_profiles up ON up.id = p.owner_profile_id
@@ -33,10 +32,12 @@ SELECT
     pod.published_at,
     pod.created_at,
     pp.position,
-    ap.author_name
+    ap.author_name,
+    c.name                AS category_name
 FROM playlist_podcasts pp
 JOIN podcasts pod        ON pod.id = pp.podcast_id
 JOIN author_profiles ap  ON ap.id  = pod.author_id
+LEFT JOIN categories c   ON c.id   = pod.category_id
 WHERE pp.playlist_id = $1
   AND pod.status = 'PUBLISHED'
 ORDER BY pp.position ASC
@@ -57,16 +58,14 @@ pub async fn fetch_playlist(pool: &PgPool, playlist_id: Uuid) -> AppResult<Playl
         return Err(AppError::Forbidden);
     }
 
-    let _ = is_public;
-
     Ok(Playlist {
         id: row.try_get("id")?,
         title: row.try_get("title")?,
         description: row.try_get("description")?,
         cover_image_url: row.try_get("cover_image_url")?,
         updated_at: row.try_get("updated_at")?,
+        owner_user_id: row.try_get("owner_user_id")?,
         owner_username: row.try_get("owner_username")?,
-        owner_avatar_url: row.try_get("owner_avatar_url")?,
         owner_language: row.try_get("owner_language")?,
     })
 }
@@ -93,6 +92,7 @@ pub async fn fetch_episodes(pool: &PgPool, playlist_id: Uuid) -> AppResult<Vec<E
             created_at: row.try_get("created_at")?,
             position: row.try_get("position")?,
             author_name: row.try_get("author_name")?,
+            category_name: row.try_get("category_name")?,
         });
     }
 
