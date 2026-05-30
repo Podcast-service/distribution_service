@@ -27,7 +27,7 @@ SELECT
     pod.description,
     pod.cover_image_url,
     pod.audio_url_file,
-    pod.audio_size_bytes,
+    pod.audio_size_file   AS audio_size_bytes,
     pod.duration_seconds,
     pod.published_at,
     pod.created_at,
