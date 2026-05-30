@@ -10,7 +10,15 @@ Mapping: **playlist → RSS channel (шоу)**, **podcast → RSS item (эпиз
 - Rust 1.83 + axum 0.7
 - sqlx (Postgres, runtime-queries — без compile-time DB)
 - quick-xml для сборки RSS с iTunes/`content:encoded` namespaces
+- reqwest для HTTP-вызовов в Auth-service (получение email владельца)
 - utoipa + Swagger UI (`/swagger-ui`)
+
+## Внешние зависимости
+
+| Сервис | Зачем | Что будет, если упал |
+|---|---|---|
+| Postgres `podcast_db` (read-only) | основной источник данных | `503` на любом запросе |
+| **Auth-service** `/internal/users/{user_id}` | email владельца плейлиста для `<itunes:owner><itunes:email>` | фид строится, но без `<itunes:email>` (логируется warning) |
 
 ## Endpoints
 
@@ -35,11 +43,14 @@ Mapping: **playlist → RSS channel (шоу)**, **podcast → RSS item (эпиз
 
 | Переменная | Default | Описание |
 |---|---|---|
-| `DATABASE_URL` | — (обязательна) | Postgres DSN, например `postgres://podcast_user:podcast_pass@localhost:5432/podcast_db` |
+| `DATABASE_URL` | — (обязательна) | Postgres DSN, например `postgres://podcast_user:podcast_pass@localhost:5433/podcast_db` |
 | `BIND_ADDR` | `0.0.0.0:8788` | Адрес HTTP-сервера (8787 занят `podcast-backend`) |
 | `PUBLIC_BASE_URL` | `http://localhost:8788` | База для `<link>` канала |
 | `DB_MAX_CONNECTIONS` | `10` | Размер пула sqlx |
 | `DB_CONNECT_TIMEOUT_SECONDS` | `5` | Таймаут acquire |
+| `AUTH_SERVICE_URL` | `http://localhost:8080` | Базовый URL Auth-service. Дёргает `GET {url}/internal/users/{user_id}` |
+| `AUTH_INTERNAL_API_TOKEN` | (пусто) | Shared-secret для `/internal/*`. Должен совпадать с `INTERNAL_API_TOKEN` в Auth-service. Если пусто — заголовок Bearer не отправляется, Auth-service вернёт 403, фид соберётся без email |
+| `AUTH_CACHE_TTL_SECONDS` | `3600` | TTL in-memory кэша на ответы Auth-service |
 | `RUST_LOG` | `distribution_service=info,tower_http=info,sqlx=warn` | Уровни логов |
 
 См. [.env.example](.env.example).
@@ -90,9 +101,16 @@ curl -i http://localhost:8788/feed/<PLAYLIST_UUID>.xml
 
 ```bash
 DATABASE_URL='postgres://reader:***@db.internal:5432/podcast_db' \
-PUBLIC_BASE_URL='https://podcasts.example.com' \
+PUBLIC_BASE_URL='https://feeds.example.com' \
+AUTH_SERVICE_URL='https://auth.internal' \
+AUTH_INTERNAL_API_TOKEN="$(cat /run/secrets/auth_internal_token)" \
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d distribution_service
 ```
+
+`AUTH_INTERNAL_API_TOKEN` — длинный случайный shared-secret
+(`openssl rand -hex 32`). Должен совпадать с `INTERNAL_API_TOKEN` в
+переменных Auth-service. См. [Auth-service README](../Auth-service/README.md)
+про endpoint `/internal/users/{user_id}`.
 
 Рекомендации для прода:
 
@@ -106,27 +124,45 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d distributi
 ## Миграции
 
 distribution_service не владеет схемой — миграции живут в `podcast-core`.
-Добавленная для этого сервиса миграция:
+Добавленные для этого сервиса миграции:
 
 - `V3__add_podcast_audio_size_bytes.sql` — колонка `podcasts.audio_size_bytes`
-  для атрибута `<enclosure length="...">` в RSS. Заполняется media-worker
-  (позже допилится в podcast-core/media-worker).
+  для атрибута `<enclosure length="...">` в RSS.
+- `V4__add_podcast_audio_url_file.sql` — колонка `podcasts.audio_url_file`,
+  прямая ссылка на исходный файл (mp3/ogg). Используется как `<enclosure url>`,
+  потому что в `audio_url` лежит HLS-плейлист (`.m3u8`), а большинство
+  подкаст-клиентов HLS не понимают.
+
+Оба поля заполняются media-worker'ом одновременно: source-файл грузится рядом
+с HLS-артефактами под `media/<file_id>/source.<ext>`, размер — через
+`fs::metadata.len()`. См. [media-worker kafka-contract](../Media_worker/docs/kafka-contract.md).
+
+Podcast-core должен слушать топик `media.worker` и на событие `converted`
+обновлять строку подкаста (`audio_url`, `audio_url_file`, `audio_size_bytes`,
+`duration_seconds`, `status='PUBLISHED'`). Этот consumer — единственное
+звено, которого пока нет в проде; distribution_service ждёт, что данные
+в БД уже есть.
 
 ## Структура
 
 ```
 src/
-├── main.rs           bootstrap: config, pool, router, graceful shutdown
-├── config.rs         AppConfig (env)
+├── main.rs           bootstrap: config, pool, auth client, router, graceful shutdown
+├── config.rs         AppConfig из env
 ├── error.rs          AppError + IntoResponse → JSON
-├── state.rs          AppState { pool, public_base_url }
+├── state.rs          AppState { pool, public_base_url, auth }
 ├── models.rs         Playlist, Episode
+├── categories.rs     compile-time таблица Apple Podcasts таксономии
+│                     + резолвер internal name → (parent, child)
+├── auth_client.rs    HTTP-клиент к Auth-service с TTL-кэшем; на сбой
+│                     отдаёт None — фид всё равно строится
 ├── db/
 │   ├── mod.rs
-│   └── queries.rs    fetch_playlist, fetch_episodes
+│   └── queries.rs    fetch_playlist, fetch_episodes (фильтр
+│                     status='PUBLISHED' AND audio_url_file IS NOT NULL)
 ├── rss/
 │   ├── mod.rs
-│   └── builder.rs    quick-xml writer → RSS 2.0 + itunes ns
+│   └── builder.rs    quick-xml → RSS 2.0 + itunes ns + content:encoded
 └── routes/
     ├── mod.rs        router + OpenApi doc
     ├── feed.rs       GET /feed/{id}
