@@ -213,13 +213,17 @@ fn write_episode<W: std::io::Write>(
         write_self_closing(writer, "itunes:image", &[("href", href)])?;
     }
 
-    let mime = guess_audio_mime(&episode.audio_url);
+    // RSS clients can't consume the HLS playlist that lives in
+    // podcasts.audio_url, so <enclosure> uses the direct file URL.
+    // SQL filter already excludes rows where audio_url_file IS NULL.
+    let enclosure_url = episode.audio_url_file.as_str();
+    let mime = guess_audio_mime(enclosure_url);
     let length = episode.audio_size_bytes.unwrap_or(0).to_string();
     write_self_closing(
         writer,
         "enclosure",
         &[
-            ("url", episode.audio_url.as_str()),
+            ("url", enclosure_url),
             ("length", length.as_str()),
             ("type", mime),
         ],

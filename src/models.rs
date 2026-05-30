@@ -19,7 +19,7 @@ pub struct Episode {
     pub title: String,
     pub description: Option<String>,
     pub cover_image_url: Option<String>,
-    pub audio_url: String,
+    pub audio_url_file: String,
     pub audio_size_bytes: Option<i64>,
     pub duration_seconds: Option<i32>,
     pub published_at: Option<DateTime<Utc>>,

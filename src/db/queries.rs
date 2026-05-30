@@ -26,7 +26,7 @@ SELECT
     pod.title,
     pod.description,
     pod.cover_image_url,
-    pod.audio_url,
+    pod.audio_url_file,
     pod.audio_size_bytes,
     pod.duration_seconds,
     pod.published_at,
@@ -40,6 +40,7 @@ JOIN author_profiles ap  ON ap.id  = pod.author_id
 LEFT JOIN categories c   ON c.id   = pod.category_id
 WHERE pp.playlist_id = $1
   AND pod.status = 'PUBLISHED'
+  AND pod.audio_url_file IS NOT NULL
 ORDER BY pp.position ASC
 "#;
 
@@ -85,7 +86,7 @@ pub async fn fetch_episodes(pool: &PgPool, playlist_id: Uuid) -> AppResult<Vec<E
             title: row.try_get("title")?,
             description: row.try_get("description")?,
             cover_image_url: row.try_get("cover_image_url")?,
-            audio_url: row.try_get("audio_url")?,
+            audio_url_file: row.try_get("audio_url_file")?,
             audio_size_bytes: row.try_get("audio_size_bytes")?,
             duration_seconds: row.try_get("duration_seconds")?,
             published_at: row.try_get("published_at")?,
