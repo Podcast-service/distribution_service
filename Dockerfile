@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1.7
 
 # ─── Build stage ─────────────────────────────────────────────
-FROM rust:1.83-slim-bookworm AS builder
+FROM rust:1.88-slim-bookworm AS builder
 
 WORKDIR /app
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
+ && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
 
 # Cache dependencies independently of source changes.
