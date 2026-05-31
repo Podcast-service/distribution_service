@@ -4,8 +4,8 @@ use anyhow::Context;
 use axum::Router;
 use sqlx::postgres::PgPoolOptions;
 use tokio::net::TcpListener;
-use tower_http::trace::TraceLayer;
-use tracing_subscriber::{prelude::*, EnvFilter};
+use tower_http::trace::{DefaultMakeSpan, TraceLayer};
+use tracing::Level;
 
 mod auth_client;
 mod categories;
@@ -16,6 +16,7 @@ mod models;
 mod routes;
 mod rss;
 mod state;
+mod telemetry;
 
 use auth_client::AuthClient;
 use config::AppConfig;
@@ -25,10 +26,7 @@ use state::AppState;
 async fn main() -> anyhow::Result<()> {
     let _ = dotenvy::dotenv();
 
-    tracing_subscriber::registry()
-        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
-        .with(tracing_subscriber::fmt::layer())
-        .init();
+    let _telemetry = telemetry::init("distribution_service");
 
     let config = AppConfig::from_env().context("invalid configuration")?;
 
@@ -64,7 +62,10 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!(addr = %config.bind_addr, "distribution_service listening");
 
-    axum::serve(listener, app.layer(TraceLayer::new_for_http()))
+    axum::serve(
+        listener,
+        app.layer(TraceLayer::new_for_http().make_span_with(DefaultMakeSpan::new().level(Level::INFO))),
+    )
         .with_graceful_shutdown(shutdown_signal())
         .await
         .context("server error")?;
