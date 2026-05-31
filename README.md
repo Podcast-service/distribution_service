@@ -23,7 +23,7 @@ Mapping: **playlist → RSS channel (шоу)**, **podcast → RSS item (эпиз
 Фид отдаётся с `Content-Type: application/rss+xml; charset=utf-8` и
 `Cache-Control: public, max-age=300`. Возвращает:
 
-- `200 OK` — фид сгенерирован.
+- `200 OK` — фид сгенерирован
 - `400 Bad Request` — невалидный UUID.
 - `403 Forbidden` — плейлист найден, но `is_public = false`.
 - `404 Not Found` — плейлист не найден.
