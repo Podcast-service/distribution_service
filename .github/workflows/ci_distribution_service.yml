@@ -15,7 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build check
-        run: docker build -t ghcr.io/podcast-service/distribution_service:pr-${{ github.event.pull_request.number }} .
+        run: |
+          docker build --no-cache -t ghcr.io/podcast-service/distribution_service:pr-${{ github.event.pull_request.number }} .
+          docker image rm ghcr.io/podcast-service/distribution_service:pr-${{ github.event.pull_request.number }}
 
   deploy:
     if: github.event.pull_request.merged == true
