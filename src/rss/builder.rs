@@ -184,7 +184,7 @@ fn write_episode<W: std::io::Write>(
     write_text(writer, "description", description)?;
     write_cdata(writer, "content:encoded", description)?;
 
-    write_text(writer, "guid", &episode.id.to_string())?;
+    write_guid(writer, &episode.id.to_string())?;
 
     write_text(writer, "itunes:episode", &episode.position.to_string())?;
     write_text(writer, "itunes:episodeType", "full")?;
@@ -249,6 +249,22 @@ fn write_text<W: std::io::Write>(
         .map_err(rss_err)?;
     writer
         .write_event(Event::End(BytesEnd::new(tag)))
+        .map_err(rss_err)?;
+    Ok(())
+}
+
+/// `<guid>` carries the bare episode UUID, which is not a URL. RSS 2.0
+/// treats a guid as a permalink unless `isPermaLink="false"` is set, so we
+/// emit it explicitly to stop clients from trying to resolve the UUID.
+fn write_guid<W: std::io::Write>(writer: &mut Writer<W>, guid: &str) -> AppResult<()> {
+    let mut start = BytesStart::new("guid");
+    start.push_attribute(("isPermaLink", "false"));
+    writer.write_event(Event::Start(start)).map_err(rss_err)?;
+    writer
+        .write_event(Event::Text(BytesText::new(guid)))
+        .map_err(rss_err)?;
+    writer
+        .write_event(Event::End(BytesEnd::new("guid")))
         .map_err(rss_err)?;
     Ok(())
 }

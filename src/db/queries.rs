@@ -20,6 +20,11 @@ JOIN user_profiles up ON up.id = p.owner_profile_id
 WHERE p.id = $1
 "#;
 
+// Only podcasts authored by the playlist's own owner are emitted: a
+// playlist maps to a single podcast "show", so foreign podcasts that were
+// added to the playlist must be dropped from the feed. The link is
+//   playlist.owner_profile_id == author_profiles.user_profile_id
+// (author_profiles.user_profile_id is UNIQUE, so this is a 1:1 match).
 const EPISODES_SQL: &str = r#"
 SELECT
     pod.id,
@@ -35,8 +40,10 @@ SELECT
     ap.author_name,
     c.name                AS category_name
 FROM playlist_podcasts pp
+JOIN playlists pl        ON pl.id  = pp.playlist_id
 JOIN podcasts pod        ON pod.id = pp.podcast_id
 JOIN author_profiles ap  ON ap.id  = pod.author_id
+                        AND ap.user_profile_id = pl.owner_profile_id
 LEFT JOIN categories c   ON c.id   = pod.category_id
 WHERE pp.playlist_id = $1
   AND pod.status = 'PUBLISHED'
