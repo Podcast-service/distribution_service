@@ -36,8 +36,10 @@ Mapping: **playlist → RSS channel (шоу)**, **podcast → RSS item (эпиз
 - `403 Forbidden` — плейлист найден, но `is_public = false`.
 - `404 Not Found` — плейлист не найден.
 
-В фид попадают только эпизоды со статусом `PUBLISHED`, отсортированные по
-`playlist_podcasts.position`.
+В фид попадают только эпизоды со статусом `PUBLISHED`, **авторство которых
+принадлежит владельцу плейлиста** (`author_profiles.user_profile_id =
+playlists.owner_profile_id`) — чужие подкасты, добавленные в плейлист,
+отбрасываются. Эпизоды отсортированы по `playlist_podcasts.position`.
 
 ## Конфигурация (env)
 
